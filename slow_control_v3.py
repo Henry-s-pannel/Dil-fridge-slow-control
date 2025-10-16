@@ -12,9 +12,6 @@ from datetime import datetime, timezone
 # -----------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------
-#save data in UTC time
-
-
 
 # MySQL database connection settings
 MYSQL_CONFIG = {
@@ -254,3 +251,4 @@ if __name__ == "__main__":
                 serial.Serial(port).close()
             except:
                 pass
+
