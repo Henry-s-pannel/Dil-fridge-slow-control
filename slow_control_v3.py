@@ -8,10 +8,14 @@ import os
 import sys
 import logging
 import serial
-
+from datetime import datetime, timezone
 # -----------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------
+#save data in UTC time
+
+
+
 # MySQL database connection settings
 MYSQL_CONFIG = {
     "host": "localhost",
@@ -118,34 +122,45 @@ class MKS2000:
                 return None
         try:
             self.ser.reset_input_buffer()
-            self.ser.write(b"p")
+            self.ser.write(b"p")  # send ASCII 112
             time.sleep(0.1)
             resp = self.ser.readline().decode(errors="replace").strip()
-
-            # Example: "- 3.7e+0 Off" or "Off 340.2e+0"
             if not resp:
                 return None
 
-            # Split and find the numeric part
+            # Normalize any Unicode minus signs to ASCII hyphen
+            bad_minus = [
+                '\u2212',  # minus sign
+                '\u2013',  # en dash
+                '\u2014',  # em dash
+                '\u2012',  # figure dash
+                '\u2010',  # hyphen
+                '\u2011',  # non-breaking hyphen
+            ]
+            for bm in bad_minus:
+                resp = resp.replace(bm, '-')
+
+            # Example responses: "- 3.7e+0 Off" or "Off 340.2e+0"
             parts = resp.split()
             numeric = None
             for p in parts:
+                # pick the first part that contains digits
                 if any(ch.isdigit() for ch in p):
                     numeric = p
                     break
 
-            if not numeric:
+            if numeric is None:
                 return None
 
-            # Detect minus sign even if separated by space
-            if resp.strip().startswith('-'):
+            # Check if the original response started with a minus
+            if resp.strip().startswith('-') and not numeric.startswith('-'):
                 numeric = '-' + numeric
 
-            # Normalize to real float
+            # Convert to float
             try:
                 pressure = float(numeric)
             except ValueError:
-                logging.warning(f"Could not parse pressure from {resp}")
+                logging.warning(f"Could not parse pressure from '{resp}'")
                 return None
 
             return pressure
@@ -154,6 +169,7 @@ class MKS2000:
             logging.warning(f"MKS2000 read error on {self.port}: {e}")
             self.ser = None
             return None
+
 
 
  
@@ -203,7 +219,7 @@ def main():
     logging.info("Starting LS218 + MKS2000 polling service... (Ctrl+C to stop)")
 
     while True:
-        timestamp = datetime.now()
+        timestamp = datetime.now(timezone.utc)
         row = {"timestamp": timestamp}
 
         # LS218 readings
@@ -217,7 +233,7 @@ def main():
         
 
         # Print to console
-        display = ", ".join(f"{k}={v:.3f}K" for k, v in row.items() if k != "timestamp" and v is not None)
+        display = ", ".join(f"{k}={v:.3f}" for k, v in row.items() if k != "timestamp" and v is not None)
         logging.info(f"[{timestamp:%H:%M:%S}] {display}")
 
         # Insert into DB
