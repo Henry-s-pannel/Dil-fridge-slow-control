@@ -225,9 +225,9 @@ class MySQLLogger:
 # -----------------------------------------------------------
 # MAIN LOOP
 # -----------------------------------------------------------
-def main():
+def main(mks_devices):
     ls218 = LS218(LS218_ADDRESS)
-    mks_devices = [MKS2000(p) for p in MKS_PORTS]
+    #mks_devices = [MKS2000(p) for p in MKS_PORTS]
     db = MySQLLogger(MYSQL_CONFIG)
 
     logging.info("Starting LS218 + MKS2000 polling service... (Ctrl+C to stop)")
@@ -260,14 +260,15 @@ def main():
 
 
 if __name__ == "__main__":
+    mks_devices_main = [MKS2000(p) for p in MKS_PORTS]
     try:
-        main()
+        # Capture the mks_devices list to close them later
+        main(mks_devices_main)
     except KeyboardInterrupt:
         logging.info("Service stopped by user.")
     finally:
-        # Close MKS serial ports
-        for port in MKS_PORTS:
-            try:
-                serial.Serial(port).close()
-            except:
-                pass
+        # Correctly close the serial ports
+        logging.info("Closing MKS serial ports.")
+        for device in mks_devices_main:
+            if device.ser and device.ser.is_open:
+                device.ser.close()
