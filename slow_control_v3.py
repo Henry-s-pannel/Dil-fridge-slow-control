@@ -9,9 +9,13 @@ import sys
 import logging
 import serial
 from datetime import datetime, timezone
+import re
 # -----------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------
+#save data in UTC time
+
+
 
 # MySQL database connection settings
 MYSQL_CONFIG = {
@@ -77,21 +81,34 @@ class LS218:
             logging.warning(f"LS218 connection failed: {e}")
             self.conn = None
 
-    def get_temp(self, channel):
+    def get_all_temps(self):
         """
-        Query temperature from a specific channel.
-        Reconnects if the connection is lost.
+        Query all temperature channels in a single atomic operation.
+        Returns a dictionary of {channel: temperature}.
         """
         if self.conn is None:
             self.connect()
-            return None
+            if self.conn is None:
+                # Return a dictionary with None values if connection fails
+                return {ch: None for ch in CHANNELS}
         try:
-            reading = self.conn.query(f"KRDG? {channel}").strip()
-            return float(reading)
+            # Clear the instrument buffer before querying to remove any stale data.
+            self.conn.clear()
+            
+            # "KRDG? 0" queries all 8 channels at once.
+            # Response is a comma-separated string, e.g., "+12.345,+50.678,..."
+            response = self.conn.query("KRDG? 0").strip()
+            
+            # Split the response and convert to floats
+            readings = [float(val) for val in response.split(',')]
+            
+            # Return a dictionary mapping channel number (1-8) to its reading
+            return {i + 1: readings[i] for i in range(len(readings))}
+        
         except (VisaIOError, ValueError) as e:
-            logging.warning(f"Channel {channel} read error: {e}")
-            self.conn = None  # force reconnect next cycle
-            return None
+            logging.warning(f"LS218 read all channels error: {e}")
+            self.conn = None  # Force reconnect on next cycle
+            return {ch: None for ch in CHANNELS}
 
 
 
@@ -220,9 +237,12 @@ def main():
         row = {"timestamp": timestamp}
 
         # LS218 readings
+        # Get all temperatures at once
+        all_temps = ls218.get_all_temps()
+
+        # Populate the row with the specific channels you care about
         for ch in CHANNELS:
-            val = ls218.get_temp(ch)
-            row[f"LS218_ch{ch}"] = val
+            row[f"LS218_ch{ch}"] = all_temps.get(ch) # .get(ch) safely returns None if key is missing
 
         # MKS2000 readings
         for i, mks in enumerate(mks_devices, start=1):  
@@ -251,4 +271,3 @@ if __name__ == "__main__":
                 serial.Serial(port).close()
             except:
                 pass
-
